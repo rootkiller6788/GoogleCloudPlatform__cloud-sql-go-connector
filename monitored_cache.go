@@ -61,7 +61,9 @@ func newMonitoredCache(
 		logger:              logger,
 		connectionInfoCache: cache,
 	}
-	if cn.HasDomainName() && !instance.IsInstanceDNSName(cn.DomainName()) {
+	// A failover period of zero disables polling, so leave the ticker unset.
+	// Note the check also guards against negative values, which would panic.
+	if cn.HasDomainName() && !instance.IsInstanceDNSName(cn.DomainName()) && failoverPeriod > 0 {
 		c.domainNameTicker = time.NewTicker(failoverPeriod)
 		go func() {
 			dnCheckCtx, cancelFn := context.WithCancel(context.Background())

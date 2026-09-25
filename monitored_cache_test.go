@@ -127,24 +127,34 @@ func TestMonitoredCache_Close(t *testing.T) {
 
 func TestMonitoredCache_OptimizationForImmutableNames(t *testing.T) {
 	tcs := []struct {
-		desc       string
-		domainName string
-		wantTicker bool
+		desc           string
+		domainName     string
+		failoverPeriod time.Duration
+		wantTicker     bool
 	}{
 		{
-			desc:       "custom DNS name",
-			domainName: "db.example.com",
-			wantTicker: true,
+			desc:           "custom DNS name",
+			domainName:     "db.example.com",
+			failoverPeriod: 10 * time.Millisecond,
+			wantTicker:     true,
 		},
 		{
-			desc:       "immutable instance DNS name",
-			domainName: "0123456789ab.fedcba9876543.us-central1.sql-psc.goog",
-			wantTicker: false,
+			desc:           "custom DNS name with polling disabled",
+			domainName:     "db.example.com",
+			failoverPeriod: 0,
+			wantTicker:     false,
 		},
 		{
-			desc:       "mutable global instance DNS name",
-			domainName: "0123456789ab.fedcba9876543.global.sql-psc.goog",
-			wantTicker: true,
+			desc:           "immutable instance DNS name",
+			domainName:     "0123456789ab.fedcba9876543.us-central1.sql-psc.goog",
+			failoverPeriod: 10 * time.Millisecond,
+			wantTicker:     false,
+		},
+		{
+			desc:           "mutable global instance DNS name",
+			domainName:     "0123456789ab.fedcba9876543.global.sql-psc.goog",
+			failoverPeriod: 10 * time.Millisecond,
+			wantTicker:     true,
 		},
 	}
 
@@ -154,7 +164,7 @@ func TestMonitoredCache_OptimizationForImmutableNames(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseConnNameWithDomainName failed: %v", err)
 			}
-			c := newMonitoredCache(&spyConnectionInfoCache{}, cn, 10*time.Millisecond, nil, &testLog{t: t})
+			c := newMonitoredCache(&spyConnectionInfoCache{}, cn, tc.failoverPeriod, nil, &testLog{t: t})
 			defer c.Close()
 
 			hasTicker := c.domainNameTicker != nil
