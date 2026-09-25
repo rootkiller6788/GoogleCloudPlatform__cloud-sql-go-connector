@@ -1273,6 +1273,58 @@ func TestDialerUpdatesAutomaticallyAfterDnsChange(t *testing.T) {
 
 }
 
+func TestDialerUpdatesAfterDnsChangeWithoutPolling(t *testing.T) {
+	// Same as above, but with failover polling disabled. There is no
+	// background ticker to notice that update.example.com now resolves to
+	// another instance, so the dialer has to pick up the change when it
+	// creates a new connection.
+	inst := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance",
+		mock.WithDNS("update.example.com"),
+	)
+	inst2 := mock.NewFakeCSQLInstance(
+		"my-project", "my-region", "my-instance2",
+		mock.WithDNS("update.example.com"),
+	)
+	r := &changingResolver{}
+
+	d := setupDialer(t, setupConfig{
+		skipServer: true,
+		reqs: []*mock.Request{
+			mock.InstanceGetSuccess(inst, 1),
+			mock.CreateEphemeralSuccess(inst, 1),
+			mock.InstanceGetSuccess(inst2, 1),
+			mock.CreateEphemeralSuccess(inst2, 1),
+		},
+		dialerOptions: []Option{
+			WithFailoverPeriod(0),
+			WithResolver(r),
+			WithTokenSource(mock.EmptyTokenSource{}),
+		},
+	})
+
+	// Execute the proxy for instance 1
+	stop1 := mock.StartServerProxy(t, inst)
+
+	testSuccessfulDial(
+		context.Background(), t, d,
+		"update.example.com",
+	)
+	stop1()
+	r.stage.Store(1)
+
+	// Execute the proxy for instance 2
+	stop2 := mock.StartServerProxy(t, inst2)
+	t.Cleanup(func() {
+		stop2()
+	})
+
+	testSucessfulDialWithInstanceName(
+		context.Background(), t, d,
+		"update.example.com", "my-instance2",
+	)
+}
+
 func TestDialerClosesOldConnectionsOpenAfterDnsChange(t *testing.T) {
 	// At first, the resolver will resolve
 	// update.example.com to "my-instance"

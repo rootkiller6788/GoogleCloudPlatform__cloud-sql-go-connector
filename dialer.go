@@ -935,6 +935,21 @@ func createKey(cn instance.ConnName) cacheKey {
 	}
 }
 
+// domainNameChanged reports whether the cached connection info belongs to a
+// different instance than the one the domain name resolves to now. Dial
+// re-resolves the domain name on every call, so a mismatch means the DNS record
+// changed and the cached info must not be reused.
+//
+// When failover polling is enabled the ticker in monitoredCache notices the
+// change by itself. This check is for the polling-disabled case, which is what
+// WithFailoverPeriod(0) configures.
+func (d *Dialer) domainNameChanged(c *monitoredCache, cn instance.ConnName) bool {
+	if d.failoverPeriod > 0 || !cn.HasDomainName() {
+		return false
+	}
+	return c.cn != cn
+}
+
 // connectionInfoCache is a helper function for returning the appropriate
 // connection info Cache in a threadsafe way. It will create a new cache,
 // modify the existing one, or leave it unchanged as needed.
@@ -947,7 +962,7 @@ func (d *Dialer) connectionInfoCache(
 	c, ok := d.cache[k]
 	d.lock.RUnlock()
 
-	if ok && !c.isClosed() {
+	if ok && !c.isClosed() && !d.domainNameChanged(c, cn) {
 		c.UpdateRefresh(useIAMAuthN)
 		return c, nil
 	}
@@ -958,10 +973,16 @@ func (d *Dialer) connectionInfoCache(
 	// Recheck to ensure instance wasn't created or changed between locks
 	c, ok = d.cache[k]
 
-	// c exists and is not closed
-	if ok && !c.isClosed() {
+	// c exists, is not closed and still belongs to the resolved instance
+	if ok && !c.isClosed() && !d.domainNameChanged(c, cn) {
 		c.UpdateRefresh(useIAMAuthN)
 		return c, nil
+	}
+
+	// c is still open, but the domain name resolves to a different instance
+	// now. Close it before replacing it with a cache for the new instance.
+	if ok && !c.isClosed() {
+		c.Close()
 	}
 
 	// Create a new instance of monitoredCache
